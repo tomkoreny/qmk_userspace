@@ -100,11 +100,11 @@ void keyboard_post_init_user(void) {
   }
 }
 
-// V + M (both transparent on the CZ layer, so this works to toggle it off too)
-// toggles the CZ Czech-accents layer on and off.
+// V + M arms the CZ Czech-accents layer for ONE keypress (one-shot); after the
+// next letter it returns to the base layer automatically.
 #if !defined (MIRYOKU_KLUDGE_THUMBCOMBOS)
-const uint16_t PROGMEM cz_toggle_combo[] = {KC_V, KC_M, COMBO_END};
+const uint16_t PROGMEM cz_combo[] = {KC_V, KC_M, COMBO_END};
 combo_t key_combos[] = {
-  COMBO(cz_toggle_combo, TG(U_CZ)),
+  COMBO(cz_combo, OSL(U_CZ)),
 };
 #endif
