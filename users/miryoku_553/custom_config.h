@@ -62,7 +62,8 @@ MIRYOKU_X(SYM,    "Sym") \
 MIRYOKU_X(FUN,    "Fun") \
 MIRYOKU_X(GAME,   "Game") \
 MIRYOKU_X(GAMENUM,"GNum") \
-MIRYOKU_X(CZ,     "CZ")
+MIRYOKU_X(CZ,     "CZ") \
+MIRYOKU_X(GAMEFN, "GFn")
 
 #define MIRYOKU_LAYERMAPPING_BASE( \
       K00,  K01,  K02,  K03,  K04,         K05,  K06,  K07,  K08,  K09, \
@@ -83,10 +84,34 @@ XXX,  K20,  K21,  K22,  K23,  K24,         K25,  K26,  K27,  K28,  K29,  XXX , \
       N30,  N31,  K32,  K33,  K34,         K35,  K36,  K37,  N38,  N39 \
 ) \
 LAYOUT_split_3x6_3( \
-XXX,  K00,  K01,  K02,  K03,  K04,         K05,  K06,  K07,  K08,  K09,  DF(U_BASE), \
-XXX,  K10,  K11,  K12,  K13,  K14,         K15,  K16,  K17,  K18,  K19,  XXX, \
-XXX,  K20,  K21,  K22,  K23,  K24,         K25,  K26,  K27,  K28,  K29,  XXX , \
+KC_F13,  K00,  K01,  K02,  K03,  K04,         K05,  K06,  K07,  K08,  K09,  DF(U_BASE), \
+KC_F14,  K10,  K11,  K12,  K13,  K14,         K15,  K16,  K17,  K18,  K19,  KC_F16, \
+KC_F15,  K20,  K21,  K22,  K23,  K24,         K25,  K26,  K27,  K28,  K29,  MO(U_GAMEFN), \
                   K32,  K33,  K34,         K35,  K36,  K37 \
 )
 #define MIRYOKU_LAYERMAPPING_GAMENUM MIRYOKU_MAPPING
 #define MIRYOKU_LAYERMAPPING_CZ MIRYOKU_MAPPING
+
+// GAME "bank" layer: hold the bank key (MO(U_GAMEFN), right-outer bottom on the
+// GAME layer) to turn the four game F-keys F13-F16 into F17-F20. Inner keys stay
+// transparent so normal game keys keep working. Cross-hand banking (hold the
+// right-side bank + tap the left-column F13-F15) is conflict-free; F16->F20
+// shares the right pinky, so reach F20 on its own.
+#define MIRYOKU_LAYER_GAMEFN \
+_______,  _______,  _______,  _______,  _______,       _______,  _______,  _______,  _______,  _______, \
+_______,  _______,  _______,  _______,  _______,       _______,  _______,  _______,  _______,  _______, \
+_______,  _______,  _______,  _______,  _______,       _______,  _______,  _______,  _______,  _______, \
+U_NP,     U_NP,     _______,  _______,  _______,       _______,  _______,  _______,  U_NP,     U_NP
+
+#define MIRYOKU_LAYERMAPPING_GAMEFN( \
+      K00,  K01,  K02,  K03,  K04,         K05,  K06,  K07,  K08,  K09, \
+      K10,  K11,  K12,  K13,  K14,         K15,  K16,  K17,  K18,  K19, \
+      K20,  K21,  K22,  K23,  K24,         K25,  K26,  K27,  K28,  K29, \
+      N30,  N31,  K32,  K33,  K34,         K35,  K36,  K37,  N38,  N39 \
+) \
+LAYOUT_split_3x6_3( \
+KC_F17,  K00,  K01,  K02,  K03,  K04,         K05,  K06,  K07,  K08,  K09,  _______, \
+KC_F18,  K10,  K11,  K12,  K13,  K14,         K15,  K16,  K17,  K18,  K19,  KC_F20, \
+KC_F19,  K20,  K21,  K22,  K23,  K24,         K25,  K26,  K27,  K28,  K29,  _______, \
+                  K32,  K33,  K34,         K35,  K36,  K37 \
+)

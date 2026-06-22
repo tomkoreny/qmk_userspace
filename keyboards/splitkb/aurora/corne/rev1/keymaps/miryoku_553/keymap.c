@@ -16,6 +16,7 @@ enum layers {
   GAME,
   GAMENUM,
   CZ,
+  GAMEFN,
 };
 
 #ifdef OLED_ENABLE
@@ -212,6 +213,9 @@ static void render_logo_text(void) {
             break;
         case CZ:
             oled_write_P(PSTR("CZ   "), false);
+            break;
+        case GAMEFN:
+            oled_write_P(PSTR("GFn  "), false);
             break;
         default:
             oled_write_P(PSTR("Wierd"), false);
