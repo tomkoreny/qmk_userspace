@@ -100,11 +100,34 @@ void keyboard_post_init_user(void) {
   }
 }
 
+// Custom keycode: toggle the default base layer between QWERTY (U_BASE) and
+// Colemak-DH (U_EXTRA), for practising Colemak. The OLED shows "Extra" while in
+// Colemak-DH.
+enum custom_keycodes {
+  CK_QWCM = QK_USER,
+};
+
+bool process_record_user(uint16_t keycode, keyrecord_t *record) {
+  if (keycode == CK_QWCM && record->event.pressed) {
+    if (get_highest_layer(default_layer_state) == U_EXTRA) {
+      default_layer_set((layer_state_t)1 << U_BASE);
+    } else {
+      default_layer_set((layer_state_t)1 << U_EXTRA);
+    }
+    return false;
+  }
+  return true;
+}
+
 // V + M arms the CZ Czech-accents layer for ONE keypress (one-shot); after the
 // next letter it returns to the base layer automatically.
+// C + , toggles QWERTY <-> Colemak-DH (both are plain keys on the same physical
+// positions in either layout, so the same chord toggles both directions).
 #if !defined (MIRYOKU_KLUDGE_THUMBCOMBOS)
 const uint16_t PROGMEM cz_combo[] = {KC_V, KC_M, COMBO_END};
+const uint16_t PROGMEM layout_combo[] = {KC_C, KC_COMM, COMBO_END};
 combo_t key_combos[] = {
   COMBO(cz_combo, OSL(U_CZ)),
+  COMBO(layout_combo, CK_QWCM),
 };
 #endif
