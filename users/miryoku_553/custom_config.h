@@ -22,6 +22,33 @@ KC_LSFT,           KC_4,              KC_5,              KC_6,             KC_G,
 KC_LCTL,           KC_7,              KC_8,              KC_9,             KC_B,             KC_BSLS,          KC_F1,            KC_F2,            KC_F3,             KC_GRAVE,        \
 U_NP,              U_NP,              DF(U_BASE),        KC_SPC,           KC_NO,            KC_MINUS,         KC_0,             KC_DOT,           U_NP,              U_NP
 
+// Czech diacritics — Unicode (lowercase) accented letters for the CZ layer.
+#define CZ_AA UC(0x00E1)  // á
+#define CZ_EE UC(0x00E9)  // é
+#define CZ_EH UC(0x011B)  // ě
+#define CZ_II UC(0x00ED)  // í
+#define CZ_OO UC(0x00F3)  // ó
+#define CZ_UU UC(0x00FA)  // ú
+#define CZ_UH UC(0x016F)  // ů
+#define CZ_YY UC(0x00FD)  // ý
+#define CZ_CC UC(0x010D)  // č
+#define CZ_DD UC(0x010F)  // ď
+#define CZ_NN UC(0x0148)  // ň
+#define CZ_RR UC(0x0159)  // ř
+#define CZ_SS UC(0x0161)  // š
+#define CZ_TT UC(0x0165)  // ť
+#define CZ_ZZ UC(0x017E)  // ž
+
+// CZ layer: Czech accents in QWERTY positions, everything else transparent so
+// it falls through to BASE (space/backspace/mods/other letters keep working).
+// Toggled on/off with the V+M combo (see manna-harbour_miryoku.c). Capital
+// accents aren't produced here — use the Super+D AI rewrite for those.
+#define MIRYOKU_LAYER_CZ \
+_______,  CZ_EH,    CZ_EE,    CZ_RR,    CZ_TT,         CZ_YY,    CZ_UH,    CZ_II,    CZ_OO,    _______, \
+CZ_AA,    CZ_SS,    CZ_DD,    _______,  _______,       _______,  CZ_UU,    _______,  _______,  _______, \
+CZ_ZZ,    _______,  CZ_CC,    _______,  _______,       CZ_NN,    _______,  _______,  _______,  _______, \
+U_NP,     U_NP,     _______,  _______,  _______,       _______,  _______,  _______,  U_NP,     U_NP
+
 #define MIRYOKU_LAYER_LIST \
 MIRYOKU_X(BASE,   "Base") \
 MIRYOKU_X(EXTRA,  "Extra") \
@@ -34,7 +61,8 @@ MIRYOKU_X(NUM,    "Num") \
 MIRYOKU_X(SYM,    "Sym") \
 MIRYOKU_X(FUN,    "Fun") \
 MIRYOKU_X(GAME,   "Game") \
-MIRYOKU_X(GAMENUM,"GNum")
+MIRYOKU_X(GAMENUM,"GNum") \
+MIRYOKU_X(CZ,     "CZ")
 
 #define MIRYOKU_LAYERMAPPING_BASE( \
       K00,  K01,  K02,  K03,  K04,         K05,  K06,  K07,  K08,  K09, \
@@ -61,3 +89,4 @@ XXX,  K20,  K21,  K22,  K23,  K24,         K25,  K26,  K27,  K28,  K29,  XXX , \
                   K32,  K33,  K34,         K35,  K36,  K37 \
 )
 #define MIRYOKU_LAYERMAPPING_GAMENUM MIRYOKU_MAPPING
+#define MIRYOKU_LAYERMAPPING_CZ MIRYOKU_MAPPING

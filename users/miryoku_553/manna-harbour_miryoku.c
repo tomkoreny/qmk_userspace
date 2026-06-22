@@ -88,3 +88,23 @@ combo_t key_combos[COMBO_COUNT] = {
   COMBO(thumbcombos_fun, KC_APP)
 };
 #endif
+
+
+// Czech diacritics layer
+
+// Default to the Linux Unicode input mode at boot (only writes EEPROM if it
+// isn't already set, to avoid flash wear).
+void keyboard_post_init_user(void) {
+  if (get_unicode_input_mode() != UNICODE_MODE_LINUX) {
+    set_unicode_input_mode(UNICODE_MODE_LINUX);
+  }
+}
+
+// V + M (both transparent on the CZ layer, so this works to toggle it off too)
+// toggles the CZ Czech-accents layer on and off.
+#if !defined (MIRYOKU_KLUDGE_THUMBCOMBOS)
+const uint16_t PROGMEM cz_toggle_combo[] = {KC_V, KC_M, COMBO_END};
+combo_t key_combos[] = {
+  COMBO(cz_toggle_combo, TG(U_CZ)),
+};
+#endif
