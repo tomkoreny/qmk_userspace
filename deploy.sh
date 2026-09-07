@@ -69,7 +69,7 @@ request_bootloader() {
     fi
     find_raw_hid || return 1
     printf 'Requesting BOOTSEL through %s.\n' "$raw_hid_device"
-    bootloader_report | timeout 5 dd of="$raw_hid_device" bs=33 count=1 iflag=fullblock oflag=nonblock conv=nocreat,notrunc status=none
+    bootloader_report | timeout 5 coreutils --coreutils-prog=dd of="$raw_hid_device" bs=33 count=1 iflag=fullblock oflag=nonblock conv=nocreat,notrunc status=none
 }
 
 find_bootloader_partition() {

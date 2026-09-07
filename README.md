@@ -64,6 +64,10 @@ is not a secret or authentication mechanism: any process allowed to write
 to that HID interface can request BOOTSEL. Deployment sends it after sudo
 authentication and does not broaden device permissions.
 
+The Linux HID sender requires the GNU `coreutils` multicall binary. It
+selects GNU `dd` explicitly because Toybox `dd` lacks the flags needed
+to send a complete report in one write.
+
 ## Extra info
 
 If you wish to point GitHub actions to a different repository, a different branch, or even a different keymap name, you can modify `.github/workflows/build_binaries.yml` to suit your needs.
