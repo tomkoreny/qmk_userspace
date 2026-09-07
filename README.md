@@ -75,6 +75,39 @@ Both displays dim after 15 seconds without input and turn off after
 Host data expires after five seconds without updates; a disconnected split
 link is identified rather than leaving its state marked live.
 
+## Linux status companion
+
+After installing the OLED firmware, start `./oled-status.sh` as your normal
+desktop user. It runs in the foreground; Ctrl-C stops both the collector
+and its HID writer. It installs no services and changes no device permissions.
+
+The companion reads the default microphone mute state and speaker
+volume/mute using `wpctl`, the current Hyprland workspace using `hyprctl`,
+and media playback using `playerctl`. It samples about once per second.
+The first MPRIS player listed by `playerctl --list-all` is selected for
+each media sample. Track text is reduced to 16 printable ASCII characters
+and workspace labels to eight; displayed volume is capped at 100%.
+
+`Mic OPEN` means the default input source is **unmuted**, not that an
+application is recording. Unavailable providers are shown as unknown
+independently. If the companion stops, the keyboard marks host data stale.
+
+Use `./oled-status.sh --once` for one read-only JSON sample, or
+`./oled-status.sh --print` for continuous read-only sampling. Neither
+command needs sudo or sends anything to the keyboard.
+
+The launcher uses Python 3 when available, otherwise `nix shell nixpkgs#python3`.
+There are no pip dependencies. Live output uses existing user HID access
+when permitted; otherwise it asks for sudo only for the status writer.
+Desktop observation never runs as root. The writer accepts validated
+status fields and constructs only `OLED` version-1 reports, not arbitrary
+Raw HID commands or bootloader requests.
+
+Start with one Corne connected. The writer pins its USB port and firmware
+serial, and can reconnect to that same controller after flashing. Restart
+the companion if you move ports or switch halves. A successful HID write
+is not a display acknowledgement: both halves need this OLED firmware.
+
 ## Flash the Liatris Aurora Corne on Linux
 
 Connect one half by USB in normal keyboard mode, then run `./deploy.sh`.
