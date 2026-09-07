@@ -42,15 +42,27 @@ Alternatively, if you configured your build targets above, you can use `qmk user
 ## Flash the Liatris Aurora Corne on Linux
 
 Connect one half by USB in normal keyboard mode, then run `./deploy.sh`.
-The script builds `miryoku_553` and asks for sudo authentication before the
-keyboard is interrupted. When it prints `READY`, double-tap reset on the
-USB-connected half and leave it connected.
+The script builds `miryoku_553`, asks for sudo authentication while the
+keyboard still works, and sends a Raw HID command to enter BOOTSEL.
+No reset-button press is needed once trigger support is installed.
 
-The script waits up to ten minutes for the UF2 drive on that same USB port,
+For the first installation on a half without trigger support, run
+`./deploy.sh --manual`. Wait for `READY`, then double-tap reset on the
+USB-connected half and leave it connected. This mode is also available
+for manual recovery.
+
+The script waits for the UF2 drive on the selected keyboard's USB port,
 copies and flushes the firmware, and checks that the original controller
-reconnects as a keyboard. It does not perform independent flash read-back.
-Repeat with USB connected directly to the other half. Bootloader entry is
-still manual; Linux-triggered entry is not implemented.
+reconnects as a keyboard. Automatic entry has a 30-second timeout; manual
+entry allows ten minutes. No independent flash read-back is performed.
+Repeat with USB connected directly to the other half; each half needs the
+initial manual installation.
+
+The trigger accepts only the 32-byte, zero-padded `CORNE_BOOTLOADER_V1`
+command over QMK Raw HID (usage page `0xFF60`, usage `0x61`). This command
+is not a secret or authentication mechanism: any process allowed to write
+to that HID interface can request BOOTSEL. Deployment sends it after sudo
+authentication and does not broaden device permissions.
 
 ## Extra info
 

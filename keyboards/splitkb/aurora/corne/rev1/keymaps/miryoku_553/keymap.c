@@ -1,11 +1,21 @@
 // empty
 #include "quantum.h"
 #include "gpio.h"
+#include "raw_hid.h"
+#include <string.h>
 
 void keyboard_pre_init_user(void) {
     // The Liatris power LED is active-low.
     gpio_set_pin_output(24);
     gpio_write_pin_high(24);
+}
+
+void raw_hid_receive(uint8_t *data, uint8_t length) {
+    // A fixed, zero-padded report; access control belongs to Linux HID permissions.
+    static const uint8_t bootloader_request[32] = "CORNE_BOOTLOADER_V1";
+    if (length == sizeof(bootloader_request) && memcmp(data, bootloader_request, sizeof(bootloader_request)) == 0) {
+        reset_keyboard();
+    }
 }
 
 // The first four layers gets a name for readability, which is then used in the OLED below.
