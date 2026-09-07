@@ -5,6 +5,12 @@
 
 #pragma once
 
+// The OLED UI owns idle dimming/blanking; host-status traffic must not wake it.
+#define OLED_TIMEOUT 0
+#define OLED_BRIGHTNESS 32
+#define SPLIT_TRANSACTION_IDS_USER CORNE_OLED_SYNC
+#define RPC_M2S_BUFFER_SIZE 64
+
 #define XXX KC_NO
 
 #define LAYOUT_miryoku( \

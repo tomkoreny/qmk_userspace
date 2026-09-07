@@ -51,6 +51,30 @@ These chords are disabled while gaming, using another functional layer,
 or while Czech accents are armed. Home-row modifiers retain their existing
 200 ms tapping term and mappings.
 
+## OLED dashboard and pages
+
+Flash the same firmware to both halves before testing the split displays.
+The USB-connected half shows the dashboard; the other half shows contextual
+hints or Linux status. The dashboard separates the base layout from the
+active layer, distinguishes held and one-shot modifiers, and shows Czech
+accent arming, Caps Word, lock indicators, and the F13–16/F17–20 gaming bank.
+Modifier columns are Ctrl, Shift, left Alt, Super/GUI, and right Alt/AltGr.
+
+Press `X+.` together on a typing layer to cycle the secondary display:
+`Auto` → `Hints` → `Host` → `Learn` → `Pal` → `Auto`.
+The chord uses the tap side of the existing AltGr keys; their mappings and
+hold timing are unchanged. Page selection is not saved across reboots.
+
+`Auto` shows layer hints on functional/gaming layers and Linux status on
+typing layers. `Learn` shows the actual QWERTY or Colemak-DH positions.
+`Pal` shows the small pixel companion; it also appears below the other
+pages and reacts briefly to keypresses rather than animating continuously.
+
+Both displays dim after 15 seconds without input and turn off after
+30 seconds. Input wakes them. Host-status updates do not keep them awake.
+Host data expires after five seconds without updates; a disconnected split
+link is identified rather than leaving its state marked live.
+
 ## Flash the Liatris Aurora Corne on Linux
 
 Connect one half by USB in normal keyboard mode, then run `./deploy.sh`.
