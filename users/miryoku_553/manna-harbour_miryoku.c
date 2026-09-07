@@ -126,8 +126,20 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
 #if !defined (MIRYOKU_KLUDGE_THUMBCOMBOS)
 const uint16_t PROGMEM cz_combo[] = {KC_V, KC_M, COMBO_END};
 const uint16_t PROGMEM layout_combo[] = {KC_C, KC_COMM, COMBO_END};
+const uint16_t PROGMEM caps_word_combo[] = {KC_C, KC_M, COMBO_END};
 combo_t key_combos[] = {
   COMBO(cz_combo, OSL(U_CZ)),
   COMBO(layout_combo, CK_QWCM),
+  COMBO(caps_word_combo, CW_TOGG),
 };
+
+bool combo_should_trigger(uint16_t combo_index, combo_t *combo, uint16_t keycode, keyrecord_t *record) {
+  (void)combo_index;
+  (void)combo;
+  (void)keycode;
+  (void)record;
+  const layer_state_t typing_layers = ((layer_state_t)1 << U_BASE) | ((layer_state_t)1 << U_EXTRA) | ((layer_state_t)1 << U_TAP);
+  const layer_state_t active_layers = layer_state | default_layer_state;
+  return active_layers != 0 && (active_layers & ~typing_layers) == 0;
+}
 #endif

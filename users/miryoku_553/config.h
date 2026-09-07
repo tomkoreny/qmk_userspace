@@ -44,7 +44,8 @@
 // Czech diacritics: input accents via the Linux (IBus / GTK Ctrl+Shift+U) method.
 #define UNICODE_SELECTED_MODES UNICODE_MODE_LINUX
 
-// Keep the CZ-layer toggle combo (V+M) tight so normal typing never triggers it.
+// Keep typing-only chords tight so ordinary key rolls do not trigger them.
 #if !defined (MIRYOKU_KLUDGE_THUMBCOMBOS)
   #define COMBO_TERM 45
+  #define COMBO_SHOULD_TRIGGER
 #endif

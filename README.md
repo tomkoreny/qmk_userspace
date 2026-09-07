@@ -39,6 +39,18 @@ This is a template repository which allows for an external set of QMK keymaps to
 
 Alternatively, if you configured your build targets above, you can use `qmk userspace-compile` to build all of your userspace targets at once.
 
+## Typing shortcuts
+
+The QWERTY, Colemak-DH and plain typing layers support these 45 ms chords:
+
+- `V+M`: arm Czech accents for the next key.
+- `C+,`: switch QWERTY and Colemak-DH.
+- `C+M`: toggle Caps Word for identifiers such as `CONSTANT_NAMES`.
+
+These chords are disabled while gaming, using another functional layer,
+or while Czech accents are armed. Home-row modifiers retain their existing
+200 ms tapping term and mappings.
+
 ## Flash the Liatris Aurora Corne on Linux
 
 Connect one half by USB in normal keyboard mode, then run `./deploy.sh`.
