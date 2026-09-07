@@ -1,5 +1,12 @@
 // empty
 #include "quantum.h"
+#include "gpio.h"
+
+void keyboard_pre_init_user(void) {
+    // The Liatris power LED is active-low.
+    gpio_set_pin_output(24);
+    gpio_write_pin_high(24);
+}
 
 // The first four layers gets a name for readability, which is then used in the OLED below.
 enum layers {
