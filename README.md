@@ -39,6 +39,19 @@ This is a template repository which allows for an external set of QMK keymaps to
 
 Alternatively, if you configured your build targets above, you can use `qmk userspace-compile` to build all of your userspace targets at once.
 
+## Flash the Liatris Aurora Corne on Linux
+
+Connect one half by USB in normal keyboard mode, then run `./deploy.sh`.
+The script builds `miryoku_553` and asks for sudo authentication before the
+keyboard is interrupted. When it prints `READY`, double-tap reset on the
+USB-connected half and leave it connected.
+
+The script waits up to ten minutes for the UF2 drive on that same USB port,
+copies and flushes the firmware, and checks that the original controller
+reconnects as a keyboard. It does not perform independent flash read-back.
+Repeat with USB connected directly to the other half. Bootloader entry is
+still manual; Linux-triggered entry is not implemented.
+
 ## Extra info
 
 If you wish to point GitHub actions to a different repository, a different branch, or even a different keymap name, you can modify `.github/workflows/build_binaries.yml` to suit your needs.
