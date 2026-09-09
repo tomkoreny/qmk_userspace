@@ -51,24 +51,29 @@ These chords are disabled while gaming, using another functional layer,
 or while Czech accents are armed. Home-row modifiers retain their existing
 200 ms tapping term and mappings.
 
-## OLED dashboard and pages
+## OLED panels
 
 Flash the same firmware to both halves before testing the split displays.
-The USB-connected half shows the dashboard; the other half shows contextual
-hints or Linux status. The dashboard separates the base layout from the
-active layer, distinguishes held and one-shot modifiers, and shows Czech
-accent arming, Caps Word, lock indicators, and the F13–16/F17–20 gaming bank.
-Modifier columns are Ctrl, Shift, left Alt, Super/GUI, and right Alt/AltGr.
+Both panels share one layout, top to bottom:
 
-Press `X+.` together on a typing layer to cycle the secondary display:
-`Auto` → `Hints` → `Host` → `Learn` → `Pal` → `Auto`.
-The chord uses the tap side of the existing AltGr keys; their mappings and
-hold timing are unchanged. Page selection is not saved across reboots.
+- A large three-letter badge for the active layer (`QWE`, `CMK`, `TAP`, `NAV`,
+  `SYM`, `NUM`, `FUN`, `MOU`, `MED`, `BTN`, `GAM`, `GNM`, `BNK`, `CZ`). An armed
+  Czech accent chord shows as `CZ` until the next key.
+- A hairline that becomes `word`, `CAPS`, `scrl`, or `num` while Caps Word or a
+  lock is on.
+- Four modifier cells, Ctrl Shift Alt Super: a dot when idle, filled while
+  held, outlined while one-shot. AltGr counts as Alt.
+- That hand's fifteen keys and three thumbs for the active layer, one glyph
+  per key. Typing layers show the QWERTY or Colemak-DH letters, so the map
+  doubles as a layout trainer; Miryoku layers show their symbols, arrows,
+  and home-row modifier letters. Layer-lock tap dances are left blank.
 
-`Auto` shows layer hints on functional/gaming layers and Linux status on
-typing layers. `Learn` shows the actual QWERTY or Colemak-DH positions.
-`Pal` shows the small pixel companion; it also appears below the other
-pages and reacts briefly to keypresses rather than animating continuously.
+The left panel's footer shows Linux status: microphone and speaker icons
+(slashed when muted), the Hyprland workspace, and a volume bar. The right
+panel shows playback state and the first fourteen characters of the media
+title on typing layers, plus the small pixel companion, which reacts briefly
+to keypresses rather than animating continuously. Host data that is unknown
+or stale is simply not drawn.
 
 Both displays dim after 15 seconds without input and turn off after
 30 seconds. Input wakes them. Host-status updates do not keep them awake.

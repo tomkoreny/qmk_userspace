@@ -105,18 +105,11 @@ void keyboard_post_init_user(void) {
 // Custom actions shared by the typing-layer combos.
 enum custom_keycodes {
   CK_QWCM = QK_USER,
-  CK_OLED_PAGE,
 };
 
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
   if (record->event.pressed) {
     corne_oled_keypress(keycode);
-  }
-  if (keycode == CK_OLED_PAGE) {
-    if (record->event.pressed) {
-      corne_oled_cycle_page();
-    }
-    return false;
   }
   if (keycode == CK_QWCM && record->event.pressed) {
     if (get_highest_layer(default_layer_state) == U_EXTRA) {
@@ -137,14 +130,10 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
 const uint16_t PROGMEM cz_combo[] = {KC_V, KC_M, COMBO_END};
 const uint16_t PROGMEM layout_combo[] = {KC_C, KC_COMM, COMBO_END};
 const uint16_t PROGMEM caps_word_combo[] = {KC_C, KC_M, COMBO_END};
-const uint16_t PROGMEM oled_page_combo[] = {ALGR_T(KC_X), ALGR_T(KC_DOT), COMBO_END};
-const uint16_t PROGMEM oled_page_tap_combo[] = {KC_X, KC_DOT, COMBO_END};
 combo_t key_combos[] = {
   COMBO(cz_combo, OSL(U_CZ)),
   COMBO(layout_combo, CK_QWCM),
   COMBO(caps_word_combo, CW_TOGG),
-  COMBO(oled_page_combo, CK_OLED_PAGE),
-  COMBO(oled_page_tap_combo, CK_OLED_PAGE),
 };
 
 bool combo_should_trigger(uint16_t combo_index, combo_t *combo, uint16_t keycode, keyrecord_t *record) {

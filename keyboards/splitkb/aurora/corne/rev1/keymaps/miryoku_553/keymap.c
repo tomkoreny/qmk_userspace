@@ -20,9 +20,8 @@
 #define LINK_STALE_MS 2500
 #define REACTION_MS 650
 
-enum oled_page { PAGE_AUTO, PAGE_HINTS, PAGE_HOST, PAGE_PRACTICE, PAGE_COMPANION, PAGE_COUNT };
 enum host_flags { MIC_KNOWN = 1, MIC_MUTED = 2, OUTPUT_KNOWN = 4, OUTPUT_MUTED = 8, WORKSPACE_KNOWN = 16, MEDIA_KNOWN = 32 };
-enum ui_flags { HOST_SEEN = 1, CAPS_WORD_ON = 2, CZ_ARMED = 4, GAMING = 8, GAME_BANK = 16 };
+enum ui_flags { HOST_SEEN = 1, CAPS_WORD_ON = 2 };
 
 // Ages saturate rather than wrapping back to "fresh" after a long disconnect.
 // The slave advances received ages on its own clock; a heartbeat is not input.
@@ -32,16 +31,12 @@ typedef struct __attribute__((packed)) {
     uint16_t input_age;
     uint16_t key_age;
     uint8_t version;
-    uint8_t layout;
     uint8_t layer;
     uint8_t held_mods;
     uint8_t oneshot_mods;
-    uint8_t oneshot_layer;
     uint8_t flags;
     uint8_t leds;
-    uint8_t page;
     uint8_t reaction;
-    uint8_t key_serial;
 } oled_state_t;
 
 _Static_assert(sizeof(oled_state_t) <= 64, "OLED snapshot exceeds split RPC buffer");
@@ -133,8 +128,8 @@ static void receive_oled_state(uint8_t length, const void *data, uint8_t reply_l
         return;
     }
     const oled_state_t *received = data;
-    if (received->version != 1 || received->page >= PAGE_COUNT || received->layout > U_GAMEFN || received->layer > U_GAMEFN ||
-        received->host_age > AGE_MAX || received->input_age > AGE_MAX || received->key_age > AGE_MAX || received->reaction > 2) {
+    if (received->version != 1 || received->layer > U_GAMEFN || received->host_age > AGE_MAX || received->input_age > AGE_MAX ||
+        received->key_age > AGE_MAX || received->reaction > 2) {
         return;
     }
     ATOMIC_BLOCK_RESTORESTATE {
@@ -148,7 +143,6 @@ void corne_oled_init(void) {
     state.version = 1;
     state.host_age = AGE_MAX;
     state.key_age = AGE_MAX;
-    state.oneshot_layer = 0xff;
     age_tick = timer_read32();
     last_sync = age_tick;
     last_input_at = last_input_activity_time();
@@ -159,21 +153,18 @@ void corne_oled_keypress(uint16_t keycode) {
     if (!is_keyboard_master()) {
         return;
     }
+    uint16_t tap = keycode;
+    if (IS_QK_MOD_TAP(keycode)) {
+        tap = QK_MOD_TAP_GET_TAP_KEYCODE(keycode);
+    } else if (IS_QK_LAYER_TAP(keycode)) {
+        tap = QK_LAYER_TAP_GET_TAP_KEYCODE(keycode);
+    }
     advance_ages(timer_read32());
     state.input_age = 0;
     state.key_age = 0;
-    state.reaction = keycode == KC_SPC ? 1 : 2;
-    ++state.key_serial;
+    state.reaction = tap == KC_SPC ? 1 : 2;
     sync_dirty = true;
     render_dirty = true;
-}
-
-void corne_oled_cycle_page(void) {
-    if (!is_keyboard_master()) {
-        return;
-    }
-    corne_oled_keypress(KC_NO);
-    state.page = (state.page + 1) % PAGE_COUNT;
 }
 
 static void sample_keyboard_state(void) {
@@ -181,29 +172,15 @@ static void sample_keyboard_state(void) {
     if (is_caps_word_on()) {
         flags |= CAPS_WORD_ON;
     }
-    uint8_t oneshot_layer = is_oneshot_layer_active() ? get_oneshot_layer() : 0xff;
-    if (oneshot_layer == U_CZ) {
-        flags |= CZ_ARMED;
-    }
-    layer_state_t layers = layer_state | default_layer_state;
-    if (layers & (((layer_state_t)1 << U_GAME) | ((layer_state_t)1 << U_GAMENUM) | ((layer_state_t)1 << U_GAMEFN))) {
-        flags |= GAMING;
-    }
-    if (layers & ((layer_state_t)1 << U_GAMEFN)) {
-        flags |= GAME_BANK;
-    }
-    uint8_t layout = get_highest_layer(default_layer_state);
-    uint8_t layer = get_highest_layer(layers);
+    // An armed one-shot CZ layer is already the highest active layer, so it needs no flag.
+    uint8_t layer = get_highest_layer(layer_state | default_layer_state);
     uint8_t held_mods = get_mods();
     uint8_t oneshot_mods = get_oneshot_mods();
     uint8_t leds = host_keyboard_led_state().raw;
-    if (state.layout != layout || state.layer != layer || state.held_mods != held_mods || state.oneshot_mods != oneshot_mods ||
-        state.oneshot_layer != oneshot_layer || state.flags != flags || state.leds != leds) {
-        state.layout = layout;
+    if (state.layer != layer || state.held_mods != held_mods || state.oneshot_mods != oneshot_mods || state.flags != flags || state.leds != leds) {
         state.layer = layer;
         state.held_mods = held_mods;
         state.oneshot_mods = oneshot_mods;
-        state.oneshot_layer = oneshot_layer;
         state.flags = flags;
         state.leds = leds;
         sync_dirty = true;
@@ -262,205 +239,314 @@ oled_rotation_t oled_init_user(oled_rotation_t rotation) {
     return OLED_ROTATION_270;
 }
 
-// Exactly five glyphs per row. Text never relies on driver wrapping or newlines.
-// The last two rows belong to the 16x16 companion, not text.
-static char displayed[14][5];
-static uint16_t displayed_inverse;
-static uint8_t displayed_sprite = 0xff;
+// Rendering: the whole 32x128 portrait panel is composed into a pixel framebuffer
+// and flushed with one oled_write_raw, which only marks changed blocks dirty.
+// Layout, top to bottom (pixel rows):
+//   0-13  layer badge, three 2x letters
+//   15-22 hairline, replaced by a lock label while Caps Word or a lock LED is on
+//   24-32 modifier cells C S A G: dot idle, filled held, outlined one-shot
+//   37-72 this hand's keys for the active layer, one glyph per key, thumbs below
+//   76-   right: media block on typing layers   left: (blank)
+//   108-  left: mic, output, workspace, level bar   right: 16x16 companion
+
+extern const unsigned char font[] PROGMEM;
+
+#define PANEL_WIDTH 32
+#define Y_STATUS 15
+#define Y_MODS 24
+#define Y_MAP 37
+#define Y_THUMBS (Y_MAP + 29)
+#define Y_MEDIA_RULE 76
+#define Y_MEDIA 80
+#define Y_FOOTER 108
+#define Y_BAR 120
+#define SPRITE_PAGE 14
+
+static uint8_t frame[OLED_MATRIX_SIZE];
 static uint8_t previous_visual = 0xff;
 static uint8_t previous_power = 0xff;
 
-static void line_flash(char frame[14][5], uint8_t row, const char *text) {
-    for (uint8_t col = 0; col < 5; ++col) {
-        char c = pgm_read_byte(text + col);
-        if (!c) {
-            break;
+static void fill(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
+    for (uint8_t row = y; row < y + h; ++row) {
+        uint8_t *page = frame + (row >> 3) * PANEL_WIDTH;
+        uint8_t bit = 1 << (row & 7);
+        for (uint8_t col = x; col < x + w; ++col) {
+            page[col] |= bit;
         }
-        frame[row][col] = c;
     }
 }
 
-#define LINE(row, text) line_flash(frame, row, PSTR(text))
+static void outline(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
+    fill(x, y, w, 1);
+    fill(x, y + h - 1, w, 1);
+    fill(x, y, 1, h);
+    fill(x + w - 1, y, 1, h);
+}
 
-static const char layer_names[][6] PROGMEM = {
-    [U_BASE] = "Base", [U_EXTRA] = "CM-DH", [U_TAP] = "Tap", [U_BUTTON] = "Buttn",
-    [U_NAV] = "Nav", [U_MOUSE] = "Mouse", [U_MEDIA] = "Media", [U_NUM] = "Num",
-    [U_SYM] = "Sym", [U_FUN] = "Fun", [U_GAME] = "Game", [U_GAMENUM] = "G.Num",
-    [U_CZ] = "CZ", [U_GAMEFN] = "Bank2"
-};
-static const char page_names[PAGE_COUNT][6] PROGMEM = { "Auto", "Hints", "Host", "Learn", "Pal" };
-
-static void layout_line(char frame[14][5], uint8_t row) {
-    if (state.layout == U_BASE || state.layout == U_TAP) {
-        line_flash(frame, row, PSTR("QWRTY"));
-    } else if (state.layout == U_EXTRA) {
-        line_flash(frame, row, PSTR("CM-DH"));
+// Eight vertical pixels at (x, y..y+7), bit 0 on top; y need not be page aligned.
+static void column(uint8_t x, uint8_t y, uint8_t bits, bool on) {
+    uint16_t shifted = (uint16_t)bits << (y & 7);
+    uint16_t index = (y >> 3) * PANEL_WIDTH + x;
+    if (on) {
+        frame[index] |= shifted;
+        if (index + PANEL_WIDTH < OLED_MATRIX_SIZE) {
+            frame[index + PANEL_WIDTH] |= shifted >> 8;
+        }
     } else {
-        line_flash(frame, row, layer_names[state.layout]);
+        frame[index] &= ~shifted;
+        if (index + PANEL_WIDTH < OLED_MATRIX_SIZE) {
+            frame[index + PANEL_WIDTH] &= ~(shifted >> 8);
+        }
     }
 }
 
-static void mods_line(char frame[14][5], uint8_t row, uint8_t mods) {
-    frame[row][0] = mods & MOD_MASK_CTRL ? 'C' : '-';
-    frame[row][1] = mods & MOD_MASK_SHIFT ? 'S' : '-';
-    frame[row][2] = mods & MOD_BIT(KC_LALT) ? 'A' : '-';
-    frame[row][3] = mods & MOD_MASK_GUI ? 'G' : '-';
-    frame[row][4] = mods & MOD_BIT(KC_RALT) ? 'R' : '-';
-}
-
-static bool host_fresh(void) {
-    return (state.flags & HOST_SEEN) && state.host_age < HOST_STALE_MS;
-}
-
-static void microphone_line(char frame[14][5], uint8_t row) {
-    if (!host_fresh() || !(state.host[5] & MIC_KNOWN)) {
-        line_flash(frame, row, PSTR("?"));
-    } else {
-        // OPEN describes the default source's mute state, never app recording.
-        line_flash(frame, row, state.host[5] & MIC_MUTED ? PSTR("MUTE") : PSTR("OPEN"));
+static void glyph(uint8_t x, uint8_t y, const uint8_t *columns, uint8_t width, bool on) {
+    for (uint8_t col = 0; col < width; ++col) {
+        column(x + col, y, pgm_read_byte(columns + col), on);
     }
 }
 
-static void dashboard(char frame[14][5]) {
-    layout_line(frame, 0);
-    LINE(1, "Layer");
-    line_flash(frame, 2, layer_names[state.layer]);
-    LINE(3, "Held");
-    mods_line(frame, 4, state.held_mods);
-    LINE(5, "1shot");
-    mods_line(frame, 6, state.oneshot_mods);
-    line_flash(frame, 7, state.flags & CZ_ARMED ? PSTR("CZ +") : PSTR("CZ -"));
-    line_flash(frame, 8, state.flags & CAPS_WORD_ON ? PSTR("CW ON") : PSTR("CW --"));
-    led_t leds = {.raw = state.leds};
-    frame[9][0] = leds.num_lock ? 'N' : '-';
-    frame[9][2] = leds.caps_lock ? 'C' : '-';
-    frame[9][4] = leds.scroll_lock ? 'S' : '-';
-    if (state.flags & GAMING) {
-        line_flash(frame, 10, state.flags & GAME_BANK ? PSTR("17-20") : PSTR("13-16"));
-    } else {
-        LINE(10, "Type");
-    }
-    line_flash(frame, 11, page_names[state.page]);
-    LINE(12, "Mic");
-    microphone_line(frame, 13);
+static void letter(uint8_t x, uint8_t y, uint8_t code, bool on) {
+    glyph(x, y, (const uint8_t *)font + code * OLED_FONT_WIDTH, 5, on);
 }
 
-// Compact, static reminders of the selected VI-navigation Miryoku maps.
-// Rows are positions/actions, not an alternative copy of the keymap enum.
-static const char hints[][12][6] PROGMEM = {
-    [U_BASE] = {"V+M", "CZ x1", "C+,", "QW/CM", "C+M", "CapsW", "X+. >", "Page", "Home", "hold", "GACS-", "-SCAG"},
-    [U_EXTRA] = {"V+M", "CZ x1", "C+,", "QW/CM", "C+M", "CapsW", "X+. >", "Page", "Home", "hold", "GACS-", "-SCAG"},
-    [U_TAP] = {"V+M", "CZ x1", "C+,", "QW/CM", "C+M", "CapsW", "X+. >", "Page", "Plain", "keys", "No", "mods"},
-    [U_BUTTON] = {"L>R", "Undo", "Cut", "Copy", "Paste", "Redo", "R>L", "same", "Thumb", "3 1 2", "2 1 3", "L / R"},
-    [U_NAV] = {"Right", "<v^>W", "W: CW", "Below", "Home", "PgDn", "PgUp", "End", "Thumb", "Enter", "Bksp", "Del"},
-    [U_MOUSE] = {"Right", "<v^>", "Below", "Wheel", "<v^>", "Thumb", "Btn2", "Btn1", "Btn3", "", "", ""},
-    [U_MEDIA] = {"Right", "Prev", "Vol-", "Vol+", "Next", "Thumb", "Stop", "Play", "Mute", "Top", "RGB", ""},
-    [U_NUM] = {"Left", "[789]", ";456=", "`123\\", "Thumb", ". 0 -", "Right", "mods", "S C A", "G", "", ""},
-    [U_SYM] = {"Left", "{&*(}", ":$%^+", "~!@#|", "Thumb", "( ) _", "Right", "mods", "S C A", "G", "", ""},
-    [U_FUN] = {"Left", "F-key", "12 7", "8 9", "11 4", "5 6", "10 1", "2 3", "Outer", "PrScr", "ScrLk", "Pause"},
-    [U_GAME] = {"Outer", "L F13", "L F14", "L F15", "R F16", "Bank", "R low", "hold", "17-20", "Thumb", "Num", "RtopQ"},
-    [U_GAMENUM] = {"Left", "E123T", "S456G", "C789B", "Right", "F7-9", "F4-6", "F1-3", "Thumb", "- 0 .", "L Alt", "QWRTY"},
-    [U_CZ] = {"QWpos", "W e^", "E e'", "U uo", "J u'", "Y y'", "C c^", "N n^", "R r^", "S s^", "Z z^", "1 key"},
-    [U_GAMEFN] = {"Bank2", "Outer", "L F17", "L F18", "L F19", "R F20", "Hold", "R low", "Inner", "game", "keys", "stay"}
+static void text(uint8_t x, uint8_t y, const char *string) {
+    for (uint8_t code; (code = pgm_read_byte(string)) != 0; ++string, x += 6) {
+        letter(x, y, code, true);
+    }
+}
+
+#define TEXT(x, y, literal) text(x, y, PSTR(literal))
+
+static void badge(const char *name) {
+    uint8_t length = strlen_P(name);
+    uint8_t x = length == 3 ? 0 : 6;
+    for (uint8_t i = 0; i < length; ++i, x += 11) {
+        const uint8_t *columns = (const uint8_t *)font + pgm_read_byte(name + i) * OLED_FONT_WIDTH;
+        for (uint8_t col = 0; col < 5; ++col) {
+            uint8_t bits = pgm_read_byte(columns + col);
+            for (uint8_t row = 0; row < 7; ++row) {
+                if (bits & (1 << row)) {
+                    fill(x + col * 2, row * 2, 2, 2);
+                }
+            }
+        }
+    }
+}
+
+static const char badges[U_GAMEFN + 1][4] PROGMEM = {
+    [U_BASE] = "QWE", [U_EXTRA] = "CMK", [U_TAP] = "TAP", [U_BUTTON] = "BTN", [U_NAV] = "NAV",
+    [U_MOUSE] = "MOU", [U_MEDIA] = "MED", [U_NUM] = "NUM", [U_SYM] = "SYM", [U_FUN] = "FUN",
+    [U_GAME] = "GAM", [U_GAMENUM] = "GNM", [U_CZ] = "CZ", [U_GAMEFN] = "BNK"
 };
 
-static void hints_page(char frame[14][5]) {
-    LINE(0, "Hints");
-    line_flash(frame, 1, layer_names[state.layer]);
-    for (uint8_t row = 0; row < 12; ++row) {
-        line_flash(frame, row + 2, hints[state.layer][row]);
-    }
-}
+enum icon { IC_SPC, IC_ENT, IC_BSPC, IC_DEL, IC_TAB, IC_ESC, IC_CW, IC_F10, IC_F11, IC_F12, IC_PAUS, IC_MENU, IC_STOP, IC_MUTE, IC_E_C, IC_E_A, IC_R_C, IC_T_C, IC_Y_A, IC_U_R, IC_I_A, IC_O_A, IC_A_A, IC_S_C, IC_D_C, IC_U_A, IC_Z_C, IC_C_C, IC_N_C, IC_SHFT };
 
-static void host_page(char frame[14][5]) {
-    LINE(0, "Host");
-    bool fresh = host_fresh();
-    line_flash(frame, 1, fresh ? PSTR("Live") : state.flags & HOST_SEEN ? PSTR("Stale") : PSTR("Wait"));
-    LINE(2, "Mic");
-    microphone_line(frame, 3);
-    LINE(4, "Sound");
-    uint8_t flags = fresh ? state.host[5] : 0;
-    if (!(flags & OUTPUT_KNOWN)) {
-        LINE(5, "?");
-    } else if (flags & OUTPUT_MUTED) {
-        LINE(5, "MUTE");
-    } else {
-        uint8_t volume = state.host[6];
-        frame[5][0] = volume == 100 ? '1' : ' ';
-        frame[5][1] = volume >= 10 ? '0' + volume / 10 % 10 : ' ';
-        frame[5][2] = '0' + volume % 10;
-        frame[5][3] = '%';
-    }
-    LINE(6, "Desk");
-    if (flags & WORKSPACE_KNOWN) {
-        for (uint8_t i = 0; i < 8 && state.host[8 + i]; ++i) {
-            frame[7 + i / 5][i % 5] = state.host[8 + i];
-        }
-    } else {
-        LINE(7, "?");
-    }
-    if (flags & MEDIA_KNOWN) {
-        line_flash(frame, 9, state.host[7] == 2 ? PSTR("PLAY") : state.host[7] == 1 ? PSTR("PAUSE") : PSTR("STOP"));
-        if (!state.host[16]) {
-            LINE(10, "None");
-        }
-        for (uint8_t i = 0; i < 16 && state.host[16 + i]; ++i) {
-            frame[10 + i / 5][i % 5] = state.host[16 + i];
-        }
-    } else {
-        LINE(9, "Media");
-        LINE(10, "?");
-    }
-}
+// Column-major 5x7 glyphs, bit 0 is the top row. Czech letters are the font's lowercase with an accent composited in rows 0-1.
+static const uint8_t icons[][5] PROGMEM = {
+    [IC_SPC] = {0x30, 0x40, 0x40, 0x40, 0x30},
+    [IC_ENT] = {0x10, 0x38, 0x10, 0x10, 0x1e},
+    [IC_BSPC] = {0x08, 0x1c, 0x3e, 0x2a, 0x3e},
+    [IC_DEL] = {0x3e, 0x2a, 0x3e, 0x1c, 0x08},
+    [IC_TAB] = {0x08, 0x2a, 0x1c, 0x08, 0x3e},
+    [IC_ESC] = {0x3c, 0x42, 0x42, 0x24, 0x1f},
+    [IC_CW] = {0x7c, 0x52, 0x51, 0x52, 0x7c},
+    [IC_F10] = {0x7f, 0x00, 0x7f, 0x41, 0x7f},
+    [IC_F11] = {0x00, 0x7f, 0x00, 0x7f, 0x00},
+    [IC_F12] = {0x7f, 0x00, 0x79, 0x49, 0x4f},
+    [IC_PAUS] = {0x3e, 0x3e, 0x00, 0x3e, 0x3e},
+    [IC_MENU] = {0x2a, 0x2a, 0x2a, 0x2a, 0x2a},
+    [IC_STOP] = {0x00, 0x3e, 0x3e, 0x3e, 0x00},
+    [IC_MUTE] = {0x5c, 0x3c, 0x3e, 0x2a, 0x45},
+    [IC_E_C] = {0x38, 0x55, 0x56, 0x55, 0x18},
+    [IC_E_A] = {0x38, 0x54, 0x56, 0x55, 0x18},
+    [IC_R_C] = {0x7c, 0x09, 0x06, 0x05, 0x08},
+    [IC_T_C] = {0x04, 0x3f, 0x44, 0x41, 0x20},
+    [IC_Y_A] = {0x4c, 0x90, 0x92, 0x91, 0x7c},
+    [IC_U_R] = {0x3c, 0x40, 0x41, 0x20, 0x7c},
+    [IC_I_A] = {0x00, 0x44, 0x7e, 0x41, 0x00},
+    [IC_O_A] = {0x38, 0x44, 0x46, 0x45, 0x38},
+    [IC_A_A] = {0x20, 0x54, 0x56, 0x79, 0x40},
+    [IC_S_C] = {0x48, 0x55, 0x56, 0x55, 0x24},
+    [IC_D_C] = {0x38, 0x44, 0x44, 0x7f, 0x03},
+    [IC_U_A] = {0x3c, 0x40, 0x42, 0x21, 0x7c},
+    [IC_Z_C] = {0x44, 0x65, 0x56, 0x4d, 0x44},
+    [IC_C_C] = {0x38, 0x45, 0x46, 0x45, 0x28},
+    [IC_N_C] = {0x7c, 0x09, 0x06, 0x05, 0x78},
+    [IC_SHFT] = {0x04, 0x06, 0x3f, 0x06, 0x04},
+};
 
-static void practice_page(char frame[14][5]) {
-    LINE(0, "Learn");
-    bool colemak = state.layout == U_EXTRA;
-    if (state.layout != U_BASE && state.layout != U_EXTRA && state.layout != U_TAP) {
-        LINE(1, "Type");
-        LINE(3, "Enter");
-        LINE(4, "QWRTY");
-        LINE(5, "or");
-        LINE(6, "CM-DH");
-        LINE(8, "first");
+// Map cells: ' ' is empty, other values below 0x80 are font glyphs, ICON(i) selects icons[i].
+#define ICON(index) (0x80 | (index))
+#define ___ ' '
+
+// One glyph per key: three rows of five, then the three thumbs (outer to inner on the left, inner to outer on the right).
+// Cells mirror the Miryoku sources; layer-lock tap dances are left blank on purpose.
+static const uint8_t maps[U_GAMEFN + 1][2][18] PROGMEM = {
+    [U_BASE] = {
+        {'Q', 'W', 'E', 'R', 'T',
+         'A', 'S', 'D', 'F', 'G',
+         'Z', 'X', 'C', 'V', 'B',
+         ICON(IC_ESC), ICON(IC_SPC), ICON(IC_TAB)},
+        {'Y', 'U', 'I', 'O', 'P',
+         'H', 'J', 'K', 'L', '\'',
+         'N', 'M', ',', '.', '/',
+         ICON(IC_ENT), ICON(IC_BSPC), ICON(IC_DEL)},
+    },
+    [U_EXTRA] = {
+        {'Q', 'W', 'F', 'P', 'B',
+         'A', 'R', 'S', 'T', 'G',
+         'Z', 'X', 'C', 'D', 'V',
+         ICON(IC_ESC), ICON(IC_SPC), ICON(IC_TAB)},
+        {'J', 'L', 'U', 'Y', '\'',
+         'M', 'N', 'E', 'I', 'O',
+         'K', 'H', ',', '.', '/',
+         ICON(IC_ENT), ICON(IC_BSPC), ICON(IC_DEL)},
+    },
+    [U_TAP] = {
+        {'Q', 'W', 'E', 'R', 'T',
+         'A', 'S', 'D', 'F', 'G',
+         'Z', 'X', 'C', 'V', 'B',
+         ICON(IC_ESC), ICON(IC_SPC), ICON(IC_TAB)},
+        {'Y', 'U', 'I', 'O', 'P',
+         'H', 'J', 'K', 'L', '\'',
+         'N', 'M', ',', '.', '/',
+         ICON(IC_ENT), ICON(IC_BSPC), ICON(IC_DEL)},
+    },
+    [U_BUTTON] = {
+        {'Z', 'X', 'C', 'V', 'Y',
+         'G', 'A', 'C', 'S', ___,
+         'Z', 'X', 'C', 'V', 'Y',
+         '3', '1', '2'},
+        {'Y', 'V', 'C', 'X', 'Z',
+         ___, 'S', 'C', 'A', 'G',
+         'Y', 'V', 'C', 'X', 'Z',
+         '2', '1', '3'},
+    },
+    [U_NAV] = {
+        {___, ___, ___, ___, ___,
+         'G', 'A', 'C', 'S', ___,
+         ___, 'R', ___, ___, ___,
+         ___, ___, ___},
+        {'Y', 'V', 'C', 'X', 'Z',
+         0x1b, 0x19, 0x18, 0x1a, ICON(IC_CW),
+         0x7f, 0x1f, 0x1e, '$', 'I',
+         ICON(IC_ENT), ICON(IC_BSPC), ICON(IC_DEL)},
+    },
+    [U_MOUSE] = {
+        {___, ___, ___, ___, ___,
+         'G', 'A', 'C', 'S', ___,
+         ___, 'R', ___, ___, ___,
+         ___, ___, ___},
+        {'Y', 'V', 'C', 'X', 'Z',
+         0x1b, 0x19, 0x18, 0x1a, ___,
+         0x11, 0x1f, 0x1e, 0x10, ___,
+         '2', '1', '3'},
+    },
+    [U_MEDIA] = {
+        {___, ___, ___, ___, ___,
+         'G', 'A', 'C', 'S', ___,
+         ___, 'R', ___, ___, ___,
+         ___, ___, ___},
+        {'M', 'H', 'S', 'V', '*',
+         0x11, '-', '+', 0x10, ___,
+         ___, ___, ___, ___, ___,
+         ICON(IC_STOP), 0x10, ICON(IC_MUTE)},
+    },
+    [U_NUM] = {
+        {'[', '7', '8', '9', ']',
+         ';', '4', '5', '6', '=',
+         '`', '1', '2', '3', '\\',
+         '.', '0', '-'},
+        {___, ___, ___, ___, ___,
+         ___, 'S', 'C', 'A', 'G',
+         ___, ___, ___, 'R', ___,
+         ___, ___, ___},
+    },
+    [U_SYM] = {
+        {'{', '&', '*', '(', '}',
+         ':', '$', '%', '^', '+',
+         '~', '!', '@', '#', '|',
+         '(', ')', '_'},
+        {___, ___, ___, ___, ___,
+         ___, 'S', 'C', 'A', 'G',
+         ___, ___, ___, 'R', ___,
+         ___, ___, ___},
+    },
+    [U_FUN] = {
+        {ICON(IC_F12), '7', '8', '9', 'P',
+         ICON(IC_F11), '4', '5', '6', 'S',
+         ICON(IC_F10), '1', '2', '3', ICON(IC_PAUS),
+         ICON(IC_MENU), ICON(IC_SPC), ICON(IC_TAB)},
+        {___, ___, ___, ___, ___,
+         ___, 'S', 'C', 'A', 'G',
+         ___, ___, ___, 'R', ___,
+         ___, ___, ___},
+    },
+    [U_GAME] = {
+        {ICON(IC_TAB), 'Q', 'W', 'E', 'R',
+         ICON(IC_SHFT), 'A', 'S', 'D', 'F',
+         '^', 'Z', 'X', 'C', 'V',
+         'A', ICON(IC_SPC), '#'},
+        {'Y', 'U', 'I', 'O', 'P',
+         'H', 'J', 'K', 'L', '\'',
+         'N', 'M', ',', '.', '/',
+         ICON(IC_ENT), ICON(IC_BSPC), ICON(IC_DEL)},
+    },
+    [U_GAMENUM] = {
+        {ICON(IC_ESC), '1', '2', '3', 'T',
+         ICON(IC_SHFT), '4', '5', '6', 'G',
+         '^', '7', '8', '9', 'B',
+         0x7f, ICON(IC_SPC), ___},
+        {'[', '7', '8', '9', ']',
+         '=', '4', '5', '6', ';',
+         '\\', '1', '2', '3', '`',
+         '-', '0', '.'},
+    },
+    [U_CZ] = {
+        {___, ICON(IC_E_C), ICON(IC_E_A), ICON(IC_R_C), ICON(IC_T_C),
+         ICON(IC_A_A), ICON(IC_S_C), ICON(IC_D_C), ___, ___,
+         ICON(IC_Z_C), ___, ICON(IC_C_C), ___, ___,
+         ___, ___, ___},
+        {ICON(IC_Y_A), ICON(IC_U_R), ICON(IC_I_A), ICON(IC_O_A), ___,
+         ___, ICON(IC_U_A), ___, ___, ___,
+         ICON(IC_N_C), ___, ___, ___, ___,
+         ___, ___, ___},
+    },
+    [U_GAMEFN] = {
+        {ICON(IC_TAB), 'Q', 'W', 'E', 'R',
+         ICON(IC_SHFT), 'A', 'S', 'D', 'F',
+         '^', 'Z', 'X', 'C', 'V',
+         'A', ICON(IC_SPC), '#'},
+        {'Y', 'U', 'I', 'O', 'P',
+         'H', 'J', 'K', 'L', '\'',
+         'N', 'M', ',', '.', '/',
+         ICON(IC_ENT), ICON(IC_BSPC), ICON(IC_DEL)},
+    },
+};
+
+static void cell(uint8_t x, uint8_t y, uint8_t code) {
+    if (code == ___) {
         return;
     }
-    layout_line(frame, 1);
-    LINE(2, "Left");
-    line_flash(frame, 3, colemak ? PSTR("QWFPB") : PSTR("QWERT"));
-    line_flash(frame, 4, colemak ? PSTR("ARSTG") : PSTR("ASDFG"));
-    line_flash(frame, 5, colemak ? PSTR("ZXCDV") : PSTR("ZXCVB"));
-    LINE(6, "Right");
-    line_flash(frame, 7, colemak ? PSTR("JLUY'") : PSTR("YUIOP"));
-    line_flash(frame, 8, colemak ? PSTR("MNEIO") : PSTR("HJKL'"));
-    line_flash(frame, 9, colemak ? PSTR("KH,./") : PSTR("NM,./"));
-    LINE(10, "Home");
-    if (state.layout == U_TAP) {
-        LINE(11, "Plain");
-        LINE(12, "keys");
+    if (code & 0x80) {
+        glyph(x, y, icons[code & 0x7f], 5, true);
     } else {
-        LINE(11, "GACS-");
-        LINE(12, "-SCAG");
-        LINE(13, "Hold");
+        letter(x, y, code, true);
     }
 }
 
-static void companion_page(char frame[14][5]) {
-    LINE(0, "Pal");
-    layout_line(frame, 1);
-    if (state.key_age < REACTION_MS) {
-        LINE(4, "Hi!");
-        LINE(6, "Nice");
-        LINE(7, "keys.");
-    } else {
-        LINE(4, "Rest");
-        LINE(6, "Tap a");
-        LINE(7, "key.");
+// 7x8 footer icons, column-major.
+static const uint8_t microphone_icon[7] PROGMEM = {0x00, 0x98, 0x9f, 0xff, 0x9f, 0x98, 0x00};
+static const uint8_t speaker_icon[7] PROGMEM = {0x3c, 0x3c, 0x7e, 0xff, 0x00, 0x24, 0x18};
+
+static void footer_icon(uint8_t x, const uint8_t *columns, bool muted) {
+    glyph(x, Y_FOOTER, columns, 7, true);
+    if (muted) {
+        for (uint8_t i = 0; i < 8; ++i) {
+            fill(x + i, Y_FOOTER + 7 - i, 1, 1);
+        }
     }
-    LINE(9, "I nap");
-    LINE(10, "at30s");
-    LINE(12, "X+. >");
-    LINE(13, "Auto");
 }
 
 // Column-major 16x16 pixels, two OLED pages per sprite. No idle animation.
@@ -473,27 +559,106 @@ static const uint8_t companion[][32] PROGMEM = {
      0x04,0x02,0x07,0x08,0x11,0x12,0x10,0x14,0x14,0x10,0x12,0x11,0x08,0x07,0x02,0x04}
 };
 
-static void draw_frame(char frame[14][5], uint16_t inverse, uint8_t sprite) {
-    for (uint8_t row = 0; row < 14; ++row) {
-        uint16_t bit = (uint16_t)1 << row;
-        if (memcmp(displayed[row], frame[row], 5) != 0 || ((displayed_inverse ^ inverse) & bit)) {
-            oled_set_cursor(0, row);
-            for (uint8_t col = 0; col < 5; ++col) {
-                oled_write_char(frame[row][col], inverse & bit);
-            }
-            memcpy(displayed[row], frame[row], 5);
+static bool host_fresh(void) {
+    return (state.flags & HOST_SEEN) && state.host_age < HOST_STALE_MS;
+}
+
+static bool typing_layer(void) {
+    return state.layer == U_BASE || state.layer == U_EXTRA || state.layer == U_TAP;
+}
+
+static void draw_status_line(void) {
+    led_t leds = {.raw = state.leds};
+    if (state.flags & CAPS_WORD_ON) {
+        TEXT(4, Y_STATUS, "word");
+    } else if (leds.caps_lock) {
+        TEXT(4, Y_STATUS, "CAPS");
+    } else if (leds.scroll_lock) {
+        TEXT(4, Y_STATUS, "scrl");
+    } else if (leds.num_lock) {
+        TEXT(7, Y_STATUS, "num");
+    } else {
+        fill(0, Y_STATUS + 4, PANEL_WIDTH, 1);
+    }
+}
+
+static void draw_mods(void) {
+    static const uint8_t masks[4] = {MOD_MASK_CTRL, MOD_MASK_SHIFT, MOD_MASK_ALT, MOD_MASK_GUI};
+    static const char letters[] = "CSAG";
+    for (uint8_t i = 0; i < 4; ++i) {
+        uint8_t x = i * 8;
+        if (state.held_mods & masks[i]) {
+            fill(x, Y_MODS, 7, 9);
+            letter(x + 1, Y_MODS + 1, letters[i], false);
+        } else if (state.oneshot_mods & masks[i]) {
+            outline(x, Y_MODS, 7, 9);
+            letter(x + 1, Y_MODS + 1, letters[i], true);
+        } else {
+            fill(x + 3, Y_MODS + 4, 1, 1);
         }
     }
-    displayed_inverse = inverse;
-    if (sprite != displayed_sprite) {
-        for (uint8_t page = 0; page < 2; ++page) {
-            for (uint8_t col = 0; col < 32; ++col) {
-                uint8_t pixels = col >= 8 && col < 24 ? pgm_read_byte(&companion[sprite][page * 16 + col - 8]) : 0;
-                oled_write_raw_byte(pixels, (14 + page) * 32 + col);
-            }
+}
+
+static void draw_map(bool left) {
+    const uint8_t *map = maps[state.layer][left ? 0 : 1];
+    for (uint8_t row = 0; row < 3; ++row) {
+        for (uint8_t col = 0; col < 5; ++col) {
+            cell(1 + col * 6, Y_MAP + row * 9, pgm_read_byte(map + row * 5 + col));
         }
-        displayed_sprite = sprite;
     }
+    uint8_t x = left ? 13 : 1;
+    for (uint8_t i = 0; i < 3; ++i) {
+        cell(x + i * 6, Y_THUMBS, pgm_read_byte(map + 15 + i));
+    }
+}
+
+static void draw_host_footer(void) {
+    if (!host_fresh()) {
+        return;
+    }
+    uint8_t flags = state.host[5];
+    if (flags & MIC_KNOWN) {
+        // Reflects the default source's mute state, never app recording.
+        footer_icon(1, microphone_icon, flags & MIC_MUTED);
+    }
+    if (flags & OUTPUT_KNOWN) {
+        footer_icon(10, speaker_icon, flags & OUTPUT_MUTED);
+        outline(1, Y_BAR, 30, 5);
+        uint8_t level = (uint16_t)state.host[6] * 28 / 100;
+        if (level && !(flags & OUTPUT_MUTED)) {
+            fill(2, Y_BAR + 1, level, 3);
+        }
+    }
+    if (flags & WORKSPACE_KNOWN) {
+        for (uint8_t i = 0; i < 2 && state.host[8 + i]; ++i) {
+            letter(20 + i * 6, Y_FOOTER, state.host[8 + i], true);
+        }
+    }
+}
+
+static void draw_media(void) {
+    if (!host_fresh() || !(state.host[5] & MEDIA_KNOWN)) {
+        return;
+    }
+    fill(0, Y_MEDIA_RULE, PANEL_WIDTH, 1);
+    uint8_t playback = state.host[7];
+    if (playback == 2) {
+        letter(1, Y_MEDIA, 0x10, true);
+    } else {
+        glyph(1, Y_MEDIA, icons[playback == 1 ? IC_PAUS : IC_STOP], 5, true);
+    }
+    // 14 characters as 4 + 5 + 5; the title comes first from the host, so the cut lands on the artist.
+    const uint8_t *title = state.host + 16;
+    for (uint8_t i = 0; i < 14 && title[i]; ++i) {
+        uint8_t row = i < 4 ? 0 : (i - 4) / 5 + 1;
+        uint8_t col = i < 4 ? i : (i - 4) % 5;
+        letter((row == 0 ? 8 : 1) + col * 6, Y_MEDIA + row * 9, title[i], true);
+    }
+}
+
+static void draw_sprite(uint8_t sprite) {
+    memcpy_P(frame + SPRITE_PAGE * PANEL_WIDTH + 8, companion[sprite], 16);
+    memcpy_P(frame + (SPRITE_PAGE + 1) * PANEL_WIDTH + 8, companion[sprite] + 16, 16);
 }
 
 bool oled_task_user(void) {
@@ -521,36 +686,26 @@ bool oled_task_user(void) {
     }
     previous_visual = visual;
     render_dirty = false;
-    char frame[14][5];
-    memset(frame, ' ', sizeof(frame));
-    uint16_t inverse = 1;
-    if (is_keyboard_master()) {
-        dashboard(frame);
-        if (state.flags & CZ_ARMED) {
-            inverse |= (uint16_t)1 << 7;
-        }
-    } else if (link_lost) {
-        LINE(0, "Link");
-        line_flash(frame, 1, link_seen ? PSTR("Lost") : PSTR("Wait"));
-        LINE(4, "Check");
-        LINE(5, "split");
-        LINE(6, "cable");
-        LINE(9, "State");
-        LINE(10, "not");
-        LINE(11, "live");
+    memset(frame, 0, sizeof(frame));
+    if (link_lost) {
+        TEXT(4, 55, "link");
+        text(4, 64, link_seen ? PSTR("lost") : PSTR("wait"));
     } else {
-        uint8_t page = state.page;
-        if (page == PAGE_AUTO) {
-            page = state.layer == U_BASE || state.layer == U_EXTRA || state.layer == U_TAP ? PAGE_HOST : PAGE_HINTS;
-        }
-        switch (page) {
-            case PAGE_HINTS: hints_page(frame); break;
-            case PAGE_HOST: host_page(frame); break;
-            case PAGE_PRACTICE: practice_page(frame); break;
-            case PAGE_COMPANION: companion_page(frame); break;
-            default: break;
+        bool left = is_keyboard_left();
+        badge(badges[state.layer]);
+        draw_status_line();
+        draw_mods();
+        draw_map(left);
+        if (left) {
+            draw_host_footer();
+        } else {
+            if (typing_layer()) {
+                draw_media();
+            }
+            draw_sprite(sprite);
         }
     }
-    draw_frame(frame, inverse, sprite);
+    oled_set_cursor(0, 0);
+    oled_write_raw((const char *)frame, sizeof(frame));
     return false;
 }
